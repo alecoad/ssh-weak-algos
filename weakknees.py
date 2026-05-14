@@ -17,18 +17,28 @@ from typing import Optional
 CLIENT_ID = b"SSH-2.0-ssh-weak-algos_1.0\r\n"
 SSH_MSG_KEXINIT = 20
 
-WEAK_CIPHERS = frozenset({
-    # RC4
-    "arcfour", "arcfour128", "arcfour256",
-    # AES-CTR
-    "aes128-ctr", "aes192-ctr", "aes256-ctr",
-    # ChaCha20
-    "chacha20-poly1305@openssh.com",
-    # CBC
-    "aes128-cbc", "aes192-cbc", "aes256-cbc",
+_RC4 = ("arcfour", "arcfour128", "arcfour256")
+_CBC = (
     "3des-cbc", "blowfish-cbc", "cast128-cbc",
+    "aes128-cbc", "aes192-cbc", "aes256-cbc",
     "rijndael-cbc@lysator.liu.se",
-})
+)
+_MODERN_FLAGGED = (
+    "aes128-ctr", "aes192-ctr", "aes256-ctr",
+    "chacha20-poly1305@openssh.com",
+)
+
+# Severity tier: 1 = critical (broken), 2 = high, 3 = medium.
+CIPHER_TIER: dict[str, int] = {
+    **{n: 1 for n in _RC4},
+    **{n: 2 for n in _CBC},
+    **{n: 3 for n in _MODERN_FLAGGED},
+}
+WEAK_CIPHERS = frozenset(CIPHER_TIER)
+
+
+def tier_rank(name: str) -> int:
+    return CIPHER_TIER.get(name, 99)
 
 
 @dataclass
@@ -234,11 +244,49 @@ def c(s: str, *codes: str) -> str:
     return "".join(ANSI[k] for k in codes) + s + ANSI["reset"]
 
 
+INLINE_CIPHER_LIMIT = 3
+
+
+def _cipher_color(name: str) -> tuple[str, ...]:
+    t = tier_rank(name)
+    if t <= 2:
+        return ("red",)
+    if t == 3:
+        return ("yellow",)
+    return ()
+
+
+def _ranked_union(c2s: list[str], s2c: list[str]) -> list[str]:
+    """Union of c2s+s2c preserving first-seen order, then stable sort by tier."""
+    seen: dict[str, None] = {}
+    for name in (*c2s, *s2c):
+        seen.setdefault(name, None)
+    return sorted(seen, key=tier_rank)
+
+
 def _bullet(name: str) -> str:
-    return f"      {c('-', 'dim')} {name}"
+    return f"      {c('-', 'dim')} {c(name, *_cipher_color(name))}"
 
 
-def format_target(r: Result, target_w: int) -> list[str]:
+def format_target_compact(r: Result, target_w: int) -> list[str]:
+    target = r.target.ljust(target_w)
+    head = f"  {target}    "
+    if r.verdict == "error":
+        return [head + c("error: " + (r.error or "unknown"), "yellow")]
+    if r.verdict == "clean":
+        return [head + c("clean", "green")]
+    ranked = _ranked_union(r.c2s_weak, r.s2c_weak)
+    shown = [c(n, *_cipher_color(n)) for n in ranked[:INLINE_CIPHER_LIMIT]]
+    extra = len(ranked) - len(shown)
+    snippet = ", ".join(shown)
+    if extra > 0:
+        snippet += "  " + c(f"(+{extra} more)", "dim")
+    if r.c2s_weak != r.s2c_weak:
+        snippet += "  " + c("(c2s/s2c differ)", "dim")
+    return [head + c("VULNERABLE", "red", "bold") + "   " + snippet]
+
+
+def format_target_verbose(r: Result, target_w: int) -> list[str]:
     target = r.target.ljust(target_w)
     head = f"  {target}    "
     if r.verdict == "error":
@@ -268,6 +316,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("-f", "--file", help="File with one target per line")
     ap.add_argument("-w", "--workers", type=int, default=20, help="Concurrent workers (default: 20)")
     ap.add_argument("--timeout", type=float, default=10.0, help="Per-target timeout seconds (default: 10)")
+    ap.add_argument("-v", "--verbose", action="store_true",
+                    help="Verbose: list every weak cipher per direction (default is a compact one-line summary).")
     ap.add_argument("--no-color", action="store_true", help="Disable ANSI color")
     args = ap.parse_args(argv)
 
@@ -302,10 +352,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         results = list(ex.map(lambda t: probe(t, args.timeout), targets))
 
     target_w = max((len(r.target) for r in results), default=10)
+    fmt = format_target_verbose if args.verbose else format_target_compact
     for i, r in enumerate(results):
-        if i:
+        if i and args.verbose:
             print()
-        for line in format_target(r, target_w):
+        for line in fmt(r, target_w):
             print(line)
 
     vuln = sum(1 for r in results if r.verdict == "vulnerable")

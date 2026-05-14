@@ -44,6 +44,23 @@ Exit code: `1` if any target is VULNERABLE, `2` on usage error, else `0`.
 $ python3 weakknees.py -f targets.txt
 SSH weak-cipher scan
 
+  10.0.0.5:22    VULNERABLE   arcfour, arcfour128, 3des-cbc  (+2 more)
+  10.0.0.6:22    VULNERABLE   chacha20-poly1305@openssh.com, aes128-ctr, aes192-ctr  (+1 more)
+  10.0.0.7:22    clean
+  10.0.0.8:22    error: connection refused
+
+  ──────────────────────────────────────
+  2 vulnerable   1 clean   1 error
+```
+
+Each row shows up to three of the most severe weak ciphers (RC4 > CBC/3DES > AES-CTR/ChaCha20), with `(+N more)` for the rest. A trailing `(c2s/s2c differ)` marker appears when the two directions don't match.
+
+Pass `-v/--verbose` for the full per-direction listing:
+
+```
+$ python3 weakknees.py -v -f targets.txt
+SSH weak-cipher scan
+
   10.0.0.5:22    VULNERABLE
     weak ciphers offered:
       - arcfour
@@ -54,13 +71,9 @@ SSH weak-cipher scan
 
   10.0.0.6:22    clean
 
-  10.0.0.7:22    error: connection refused
-
   ──────────────────────────────────────
-  1 vulnerable   1 clean   1 error
+  1 vulnerable   1 clean   0 error
 ```
-
-When the client→server and server→client cipher lists differ, they're shown as separate sub-blocks instead of the collapsed `weak ciphers offered:` form.
 
 Color is emitted when stdout is a TTY; pass `--no-color` or pipe to a file to suppress.
 
