@@ -234,25 +234,36 @@ def c(s: str, *codes: str) -> str:
     return "".join(ANSI[k] for k in codes) + s + ANSI["reset"]
 
 
-def format_row(r: Result, target_w: int) -> list[str]:
+def _bullet(name: str) -> str:
+    return f"      {c('-', 'dim')} {name}"
+
+
+def format_target(r: Result, target_w: int) -> list[str]:
     target = r.target.ljust(target_w)
+    head = f"  {target}    "
     if r.verdict == "error":
-        return [f"{target}  {c('error: ' + (r.error or 'unknown'), 'yellow')}"]
-    if r.verdict == "vulnerable":
-        lines = [f"{target}  {c('VULNERABLE', 'red', 'bold')}"]
+        return [head + c("error: " + (r.error or "unknown"), "yellow")]
+    if r.verdict == "clean":
+        return [head + c("clean", "green")]
+    lines = [head + c("VULNERABLE", "red", "bold")]
+    if r.c2s_weak and r.c2s_weak == r.s2c_weak:
+        lines.append("    " + c("weak ciphers offered:", "dim"))
+        lines.extend(_bullet(n) for n in r.c2s_weak)
+    else:
         if r.c2s_weak:
-            lines.append(f"   c2s: {','.join(r.c2s_weak)}")
+            lines.append("    " + c("client → server:", "dim"))
+            lines.extend(_bullet(n) for n in r.c2s_weak)
         if r.s2c_weak:
-            lines.append(f"   s2c: {','.join(r.s2c_weak)}")
-        return lines
-    return [f"{target}  {c('clean', 'green')}"]
+            lines.append("    " + c("server → client:", "dim"))
+            lines.extend(_bullet(n) for n in r.s2c_weak)
+    return lines
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(
-        description="Reproduce Nessus 'SSH Weak Algorithms Supported' finding "
-                    "by reading the server's offered KEXINIT cipher lists. "
-                    "Stdlib only; no auth or key exchange performed.")
+        description="Scan SSH servers for weak encryption algorithms by reading "
+                    "the offered KEXINIT cipher lists. Stdlib only; no auth or "
+                    "key exchange performed.")
     ap.add_argument("target", nargs="?", help="Single target, e.g. 10.0.0.5:22 or 10.0.0.5")
     ap.add_argument("-f", "--file", help="File with one target per line")
     ap.add_argument("-w", "--workers", type=int, default=20, help="Concurrent workers (default: 20)")
@@ -284,25 +295,29 @@ def main(argv: Optional[list[str]] = None) -> int:
     else:
         targets = [args.target]
 
-    print(c("check: SSH Weak Algorithms Supported (Nessus-style)", "cyan"))
+    print(c("SSH weak-cipher scan", "cyan", "bold"))
     print()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as ex:
         results = list(ex.map(lambda t: probe(t, args.timeout), targets))
 
     target_w = max((len(r.target) for r in results), default=10)
-    for r in results:
-        for line in format_row(r, target_w):
+    for i, r in enumerate(results):
+        if i:
+            print()
+        for line in format_target(r, target_w):
             print(line)
 
     vuln = sum(1 for r in results if r.verdict == "vulnerable")
     clean = sum(1 for r in results if r.verdict == "clean")
     err = sum(1 for r in results if r.verdict == "error")
     print()
-    print(c(f"{vuln} vulnerable", "red", "bold")
-          + " / "
+    print("  " + c("─" * 38, "dim"))
+    print("  "
+          + c(f"{vuln} vulnerable", "red", "bold")
+          + "   "
           + c(f"{clean} clean", "green")
-          + " / "
+          + "   "
           + c(f"{err} error", "dim"))
 
     return 1 if vuln else 0
