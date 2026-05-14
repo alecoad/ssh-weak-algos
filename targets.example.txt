@@ -1,0 +1,6 @@
+# One target per line. host:port, bare host (port 22), or [ipv6]:port.
+# Blank lines and # comments are ignored.
+127.0.0.1
+10.0.0.5:22
+10.0.0.6:2222
+[::1]:22
