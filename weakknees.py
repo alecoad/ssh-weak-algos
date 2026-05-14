@@ -246,6 +246,18 @@ def c(s: str, *codes: str) -> str:
 
 INLINE_CIPHER_LIMIT = 3
 
+# Lower rank prints first (worst-first).
+STATUS_RANK = {"vulnerable": 0, "error": 1, "clean": 2}
+STATUS_WIDTH = len("VULNERABLE")  # pad all badges to this so detail column lines up
+
+
+def _status_badge(verdict: str) -> str:
+    if verdict == "vulnerable":
+        return c("VULNERABLE".ljust(STATUS_WIDTH), "red", "bold")
+    if verdict == "clean":
+        return c("CLEAN".ljust(STATUS_WIDTH), "green")
+    return c("ERROR".ljust(STATUS_WIDTH), "yellow")
+
 
 def _cipher_color(name: str) -> tuple[str, ...]:
     t = tier_rank(name)
@@ -268,13 +280,11 @@ def _bullet(name: str) -> str:
     return f"      {c('-', 'dim')} {c(name, *_cipher_color(name))}"
 
 
-def format_target_compact(r: Result, target_w: int) -> list[str]:
-    target = r.target.ljust(target_w)
-    head = f"  {target}    "
+def _detail_compact(r: Result) -> str:
     if r.verdict == "error":
-        return [head + c("error: " + (r.error or "unknown"), "yellow")]
+        return c(r.error or "unknown", "yellow")
     if r.verdict == "clean":
-        return [head + c("clean", "green")]
+        return ""
     ranked = _ranked_union(r.c2s_weak, r.s2c_weak)
     shown = [c(n, *_cipher_color(n)) for n in ranked[:INLINE_CIPHER_LIMIT]]
     extra = len(ranked) - len(shown)
@@ -283,17 +293,26 @@ def format_target_compact(r: Result, target_w: int) -> list[str]:
         snippet += "  " + c(f"(+{extra} more)", "dim")
     if r.c2s_weak != r.s2c_weak:
         snippet += "  " + c("(c2s/s2c differ)", "dim")
-    return [head + c("VULNERABLE", "red", "bold") + "   " + snippet]
+    return snippet
+
+
+def format_target_compact(r: Result, target_w: int) -> list[str]:
+    target = r.target.ljust(target_w)
+    detail = _detail_compact(r)
+    line = f"  {target}   {_status_badge(r.verdict)}"
+    if detail:
+        line += "   " + detail
+    return [line]
 
 
 def format_target_verbose(r: Result, target_w: int) -> list[str]:
     target = r.target.ljust(target_w)
-    head = f"  {target}    "
+    head = f"  {target}   {_status_badge(r.verdict)}"
     if r.verdict == "error":
-        return [head + c("error: " + (r.error or "unknown"), "yellow")]
+        return [head + "   " + c(r.error or "unknown", "yellow")]
     if r.verdict == "clean":
-        return [head + c("clean", "green")]
-    lines = [head + c("VULNERABLE", "red", "bold")]
+        return [head]
+    lines = [head]
     if r.c2s_weak and r.c2s_weak == r.s2c_weak:
         lines.append("    " + c("weak ciphers offered:", "dim"))
         lines.extend(_bullet(n) for n in r.c2s_weak)
@@ -350,6 +369,9 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as ex:
         results = list(ex.map(lambda t: probe(t, args.timeout), targets))
+
+    # Stable sort by status (vulnerable → error → clean); input order preserved within each group.
+    results.sort(key=lambda r: STATUS_RANK.get(r.verdict, 99))
 
     target_w = max((len(r.target) for r in results), default=10)
     fmt = format_target_verbose if args.verbose else format_target_compact

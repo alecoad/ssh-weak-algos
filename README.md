@@ -46,14 +46,14 @@ SSH weak-cipher scan
 
   10.0.0.5:22    VULNERABLE   arcfour, arcfour128, 3des-cbc  (+2 more)
   10.0.0.6:22    VULNERABLE   chacha20-poly1305@openssh.com, aes128-ctr, aes192-ctr  (+1 more)
-  10.0.0.7:22    clean
-  10.0.0.8:22    error: connection refused
+  10.0.0.8:22    ERROR        connection refused
+  10.0.0.7:22    CLEAN
 
   ──────────────────────────────────────
   2 vulnerable   1 clean   1 error
 ```
 
-Each row shows up to three of the most severe weak ciphers (RC4 > CBC/3DES > AES-CTR/ChaCha20), with `(+N more)` for the rest. A trailing `(c2s/s2c differ)` marker appears when the two directions don't match.
+Rows are sorted by status (vulnerable → error → clean) so the worst surfaces first; input order is preserved within each group. Each vulnerable row shows up to three of the most severe weak ciphers (RC4 > CBC/3DES > AES-CTR/ChaCha20), with `(+N more)` for the rest. A trailing `(c2s/s2c differ)` marker appears when the two directions don't match.
 
 Pass `-v/--verbose` for the full per-direction listing:
 
@@ -69,7 +69,7 @@ SSH weak-cipher scan
       - aes128-cbc
       - 3des-cbc
 
-  10.0.0.6:22    clean
+  10.0.0.6:22    CLEAN
 
   ──────────────────────────────────────
   1 vulnerable   1 clean   0 error
